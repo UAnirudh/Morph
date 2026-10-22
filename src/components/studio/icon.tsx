@@ -1,0 +1,60 @@
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  Briefcase,
+  Building2,
+  CheckSquare,
+  Clock,
+  DollarSign,
+  Filter,
+  Flag,
+  GitCompare,
+  Layers,
+  LayoutDashboard,
+  ListChecks,
+  Plus,
+  Settings,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserCheck,
+  Users,
+  Workflow,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import type { IconName } from "@/lib/morph/config";
+
+export const ICON_MAP: Record<IconName, LucideIcon> = {
+  "layout-dashboard": LayoutDashboard,
+  users: Users,
+  "user-check": UserCheck,
+  briefcase: Briefcase,
+  "check-square": CheckSquare,
+  building: Building2,
+  activity: Activity,
+  workflow: Workflow,
+  settings: Settings,
+  sparkles: Sparkles,
+  "trending-up": TrendingUp,
+  target: Target,
+  "alert-triangle": AlertTriangle,
+  clock: Clock,
+  "dollar-sign": DollarSign,
+  filter: Filter,
+  zap: Zap,
+  "list-checks": ListChecks,
+  "chart-bar": BarChart3,
+  "arrow-right": ArrowRight,
+  plus: Plus,
+  layers: Layers,
+  "git-compare": GitCompare,
+  flag: Flag,
+};
+
+export function MorphIcon({ name, className }: { name: IconName; className?: string }) {
+  const Icon = ICON_MAP[name] ?? ArrowRight;
+  return <Icon className={className} aria-hidden />;
+}
