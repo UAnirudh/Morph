@@ -10,7 +10,7 @@ import {
   listLeadOptions,
   listOwnerOptions,
 } from "@/lib/crm/mutations";
-import { providerModel } from "@/lib/morph/provider";
+import { configuredEngineLabel } from "@/lib/morph/provider";
 import type { JobRole, MetricKey } from "@/lib/morph/config";
 import { StudioWorkspace } from "@/components/studio/workspace";
 
@@ -22,15 +22,15 @@ export default async function StudioPage() {
   const role = ctx.preferences.job_role as JobRole;
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
 
-  const active = getActiveInterface(db, {
+  const active = await getActiveInterface(db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: role,
   });
 
-  const data = resolveConfigData(db, scope, active.config.components);
-  const history = listProposals(db, active.iface.id, 10);
+  const data = await resolveConfigData(db, scope, active.config.components);
+  const history = await listProposals(db, active.iface.id, 10);
   const dismissed = JSON.parse(ctx.preferences.dismissed_suggestions ?? "[]") as string[];
 
   const relevantMetrics: MetricKey[] = [
@@ -41,11 +41,12 @@ export default async function StudioPage() {
     "win_rate",
     "team_workload",
   ];
-  const metrics = Object.fromEntries(
-    relevantMetrics.map((key) => [key, resolveMetric(db, scope, key)]),
-  ) as Partial<Record<MetricKey, number>>;
+  const metrics: Partial<Record<MetricKey, number>> = {};
+  for (const key of relevantMetrics) {
+    metrics[key] = await resolveMetric(db, scope, key);
+  }
 
-  const notifications = db
+  const notifications = await db
     .prepare(
       `SELECT id, title, body, kind, created_at AS createdAt, read_at AS readAt
        FROM notifications WHERE workspace_id = ? AND (user_id = ? OR user_id IS NULL)
@@ -60,17 +61,17 @@ export default async function StudioPage() {
     readAt: string | null;
   }>;
 
-  const engineLabel = process.env.OPENAI_API_KEY ? providerModel() : "Local planner";
+  const engineLabel = configuredEngineLabel();
 
   return (
     <StudioWorkspace
       config={active.config}
       data={data}
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
       role={role}
       user={{ name: ctx.user.name, email: ctx.user.email }}

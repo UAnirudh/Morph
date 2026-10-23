@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "@/lib/db";
 import { hashPassword, unusablePasswordHash } from "@/lib/auth/password";
 import { classicCrmConfig, rolePresetConfig } from "@/lib/morph/presets";
 import { workflowDefinitionSchema } from "@/lib/workflows/schema";
@@ -100,23 +100,23 @@ export interface ProvisionResult {
  * preferences. Used both by the demo seeder and by real signups, so every new
  * account starts inside a working CRM rather than an empty shell.
  */
-export function provisionWorkspace(db: Database.Database, options: ProvisionOptions): ProvisionResult {
+export async function provisionWorkspace(db: Db, options: ProvisionOptions): Promise<ProvisionResult> {
   const rand = mulberry32(options.seed);
   const { now, slug, workspaceId } = options;
   const ownerId = options.owner.id;
-  const run = db.transaction(() => {
-    db.prepare(
+  return db.transaction(async (db) => {
+    await db.prepare(
       "INSERT INTO workspaces (id, name, slug, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
     ).run(workspaceId, options.workspaceName, slug, ownerId, iso(shift(now, -120)));
 
-    db.prepare(
+    await db.prepare(
       "INSERT INTO workspace_members (workspace_id, user_id, role, job_role, created_at) VALUES (?, ?, 'owner', ?, ?)",
     ).run(workspaceId, ownerId, options.jobRole, iso(shift(now, -120)));
 
     const teammates = options.teammates ?? [];
     const teamIds: string[] = [];
     for (const teammate of teammates) {
-      db.prepare(
+      await db.prepare(
         `INSERT INTO users (id, email, name, password_hash, avatar_color, created_at)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(email) DO NOTHING`,
@@ -128,12 +128,12 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
         pick(rand, ["violet", "sky", "emerald", "amber"]),
         iso(shift(now, -110)),
       );
-      const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(teammate.email) as
+      const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(teammate.email) as
         | { id: string }
         | undefined;
       const memberId = existing?.id ?? teammate.id;
       teamIds.push(memberId);
-      db.prepare(
+      await db.prepare(
         "INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role, job_role, created_at) VALUES (?, ?, 'member', ?, ?)",
       ).run(workspaceId, memberId, teammate.jobRole, iso(shift(now, -110)));
     }
@@ -141,14 +141,23 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
 
     // --- companies -------------------------------------------------------
     const companyIds: string[] = [];
-    COMPANIES.forEach((company, index) => {
+    for (const [index, company] of COMPANIES.entries()) {
       const id = `${slug}-co-${index + 1}`;
       companyIds.push(id);
-      db.prepare(
+      await db.prepare(
         `INSERT INTO companies (id, workspace_id, name, industry, size, city, website, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, workspaceId, company.name, company.industry, company.size, company.city, company.website, iso(shift(now, -int(rand, 200, 400))));
-    });
+      ).run(
+        id,
+        workspaceId,
+        company.name,
+        company.industry,
+        company.size,
+        company.city,
+        company.website,
+        iso(shift(now, -int(rand, 200, 400))),
+      );
+    }
 
     // --- contacts --------------------------------------------------------
     const contactIds: string[] = [];
@@ -158,7 +167,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       const companyIndex = i % companyIds.length;
       const id = `${slug}-ct-${i + 1}`;
       contactIds.push(id);
-      db.prepare(
+      await db.prepare(
         `INSERT INTO contacts (id, workspace_id, company_id, first_name, last_name, email, phone, title, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -200,7 +209,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
         status === "new"
           ? null
           : iso(shift(now, -(stale ? int(rand, 8, 24) : int(rand, 0, 5))));
-      db.prepare(
+      await db.prepare(
         `INSERT INTO leads (id, workspace_id, company_id, contact_id, name, company, email, phone, source,
            status, score, owner_id, last_contacted_at, flagged, flag_reason, notes, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -236,7 +245,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       "lost", "lost",
     ];
     const dealIds: string[] = [];
-    dealStages.forEach((stage, index) => {
+    for (const [index, stage] of dealStages.entries()) {
       const companyIndex = index % COMPANIES.length;
       const company = COMPANIES[companyIndex]!;
       const closed = stage === "won" || stage === "lost";
@@ -250,7 +259,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       const amount = int(rand, 18, 240) * 1000;
       const id = `${slug}-deal-${index + 1}`;
       dealIds.push(id);
-      db.prepare(
+      await db.prepare(
         `INSERT INTO deals (id, workspace_id, company_id, lead_id, name, stage, amount, probability,
            owner_id, expected_close_date, closed_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -269,7 +278,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
         iso(shift(now, -int(rand, 40, 180))),
         iso(shift(now, -updatedDaysAgo)),
       );
-    });
+    }
 
     // --- tasks -----------------------------------------------------------
     const taskIds: string[] = [];
@@ -284,7 +293,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
         i < 5 ? 0 : i < 11 ? -int(rand, 1, 6) : int(rand, 1, 16);
       const due = new Date(todayIso.getTime() + dueOffset * DAY);
       const relatedDeal = dealIds[i % dealIds.length]!;
-      db.prepare(
+      await db.prepare(
         `INSERT INTO tasks (id, workspace_id, title, notes, status, priority, due_date, assignee_id,
            related_type, related_id, created_by, created_at, completed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -309,7 +318,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
     for (let i = 0; i < 60; i += 1) {
       const template = ACTIVITY_TEMPLATES[i % ACTIVITY_TEMPLATES.length]!;
       const company = COMPANIES[i % COMPANIES.length]!;
-      db.prepare(
+      await db.prepare(
         `INSERT INTO activities (id, workspace_id, kind, subject, body, lead_id, deal_id, contact_id, actor_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -327,7 +336,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
     }
 
     // --- notifications ---------------------------------------------------
-    db.prepare(
+    await db.prepare(
       `INSERT INTO notifications (id, workspace_id, user_id, title, body, kind, href, read_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -341,7 +350,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       null,
       iso(shift(now, -1, -3)),
     );
-    db.prepare(
+    await db.prepare(
       `INSERT INTO notifications (id, workspace_id, user_id, title, body, kind, href, read_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -392,7 +401,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
         },
       ],
     });
-    db.prepare(
+    await db.prepare(
       `INSERT INTO workflow_definitions (id, workspace_id, name, description, enabled, definition, trigger_type, created_by, created_at, updated_at, last_run_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -408,7 +417,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       iso(shift(now, -1)),
       iso(shift(now, -1, -2)),
     );
-    db.prepare(
+    await db.prepare(
       `INSERT INTO workflow_definitions (id, workspace_id, name, description, enabled, definition, trigger_type, created_by, created_at, updated_at, last_run_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -425,7 +434,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       null,
     );
     // Seeded history so the automation panel is not empty on first load.
-    db.prepare(
+    await db.prepare(
       `INSERT INTO workflow_runs (id, workspace_id, workflow_id, trigger_type, status, matched, actions, log, dedupe_key, error, duration_ms, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -540,7 +549,7 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       ops_manager: ["Reduce bottlenecks", "Balance team workload", "Keep process clean"],
       general: ["See what matters", "Reduce clutter"],
     };
-    db.prepare(
+    await db.prepare(
       `INSERT INTO user_preferences (user_id, workspace_id, job_role, primary_goals, density, preferred_metrics, accessibility, active_interface_id, onboarding_complete, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -567,8 +576,6 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
       taskCount: taskIds.length,
     };
   });
-
-  return run();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -578,22 +585,22 @@ export function provisionWorkspace(db: Database.Database, options: ProvisionOpti
 export const DEMO_EMAIL = "demo@morph.app";
 export const DEMO_NAME = "Maya Chen";
 
-export function seedDemoWorkspace(
-  db: Database.Database,
+export async function seedDemoWorkspace(
+  db: Db,
   options: { now?: Date; password?: string } = {},
-): ProvisionResult {
+): Promise<ProvisionResult> {
   const now = options.now ?? new Date();
   const password = options.password ?? process.env.MORPH_DEMO_PASSWORD ?? "morph-demo";
   const workspaceId = "ws_demo_acme";
   const ownerId = "user_demo_maya";
 
-  db.prepare(
+  await db.prepare(
     `INSERT INTO users (id, email, name, password_hash, avatar_color, created_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash`,
   ).run(ownerId, DEMO_EMAIL, DEMO_NAME, hashPassword(password), "violet", iso(shift(now, -120)));
 
-  const owner = db.prepare("SELECT id FROM users WHERE email = ?").get(DEMO_EMAIL) as { id: string };
+  const owner = await db.prepare("SELECT id FROM users WHERE email = ?").get(DEMO_EMAIL) as { id: string };
 
   return provisionWorkspace(db, {
     workspaceId,
@@ -622,11 +629,11 @@ const TEAMMATES = [
   { name: "Alex Kim", jobRole: "ops_manager" as JobRole },
 ];
 
-export function provisionWorkspaceForUser(
-  db: Database.Database,
+export async function provisionWorkspaceForUser(
+  db: Db,
   user: { id: string; name: string; email: string; jobRole: JobRole },
   options: { now?: Date } = {},
-): ProvisionResult {
+): Promise<ProvisionResult> {
   const now = options.now ?? new Date();
   const workspaceId = `ws_${user.id.slice(0, 8)}`;
   const slug = `ws-${user.id.slice(0, 8)}`;

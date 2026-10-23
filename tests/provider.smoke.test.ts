@@ -1,19 +1,20 @@
 /**
  * Real-provider smoke test.
  *
- * Skipped unless OPENAI_API_KEY is set (tests/setup.ts clears it for the
- * deterministic suite). When a key IS present this makes one real call, then
- * asserts that whatever comes back already satisfies the transformation schema
- * — the same validator the app runs before it will preview anything.
+ * Skipped unless OPENAI_API_KEY or GROQ_API_KEY is set (tests/setup.ts clears
+ * both for the deterministic suite). When a key IS present this makes one real
+ * call, then asserts that whatever comes back already satisfies the
+ * transformation schema — the same validator the app runs before previewing.
  *
+ *   GROQ_API_KEY=... npx vitest run tests/provider.smoke.test.ts
  *   OPENAI_API_KEY=... npx vitest run tests/provider.smoke.test.ts
  */
 import { describe, expect, it } from "vitest";
-import { isProviderConfigured, planWithProvider, providerModel } from "@/lib/morph/provider";
+import { isProviderConfigured, planWithProvider, resolveProvider } from "@/lib/morph/provider";
 import { validateMorphResult } from "@/lib/morph/result";
 import { classicCrmConfig } from "@/lib/morph/presets";
 
-const hasKey = Boolean(process.env.OPENAI_API_KEY?.trim());
+const hasKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim());
 
 describe.skipIf(!hasKey)("live model provider (smoke)", () => {
   it("returns a schema-valid transformation for a supported request", async () => {
@@ -26,7 +27,8 @@ describe.skipIf(!hasKey)("live model provider (smoke)", () => {
       goals: [],
     });
 
-    expect(outcome.model).toBe(providerModel());
+    expect(outcome.model).toBe(resolveProvider()!.model);
+    expect(["openai", "groq"]).toContain(outcome.provider);
     expect(outcome.latencyMs).toBeGreaterThan(0);
     expect(outcome.ok, outcome.ok ? "" : `provider error: ${outcome.error}`).toBe(true);
     if (!outcome.ok || !outcome.result) return;

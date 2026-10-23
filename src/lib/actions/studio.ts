@@ -82,7 +82,7 @@ export async function proposeAction(prompt: string): Promise<ProposeActionResult
     };
   }
 
-  const active = getActiveInterface(ctx.db, {
+  const active = await getActiveInterface(ctx.db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
@@ -114,7 +114,7 @@ export async function applyProposalAction(proposalId: string): Promise<{
   workflowId?: string;
 }> {
   const ctx = await context();
-  const outcome = applyTransformation({
+  const outcome = await applyTransformation({
     db: ctx.db,
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
@@ -132,7 +132,7 @@ export async function applyProposalAction(proposalId: string): Promise<{
 
 export async function discardProposalAction(proposalId: string): Promise<{ ok: boolean }> {
   const ctx = await context();
-  const outcome = discardProposal({
+  const outcome = await discardProposal({
     db: ctx.db,
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
@@ -144,14 +144,14 @@ export async function discardProposalAction(proposalId: string): Promise<{ ok: b
 
 export async function undoAction(): Promise<{ ok: boolean; error?: string; summary?: string }> {
   const ctx = await context();
-  const active = getActiveInterface(ctx.db, {
+  const active = await getActiveInterface(ctx.db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: ctx.preferences.job_role as JobRole,
   });
   try {
-    const snapshot = undoLastChange(ctx.db, {
+    const snapshot = await undoLastChange(ctx.db, {
       interfaceId: active.iface.id,
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,
@@ -166,7 +166,7 @@ export async function undoAction(): Promise<{ ok: boolean; error?: string; summa
 export async function restoreVersionAction(versionId: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
   try {
-    restoreVersion(ctx.db, {
+    await restoreVersion(ctx.db, {
       versionId,
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,
@@ -180,7 +180,7 @@ export async function restoreVersionAction(versionId: string): Promise<{ ok: boo
 
 export async function saveCanvasAction(configInput: unknown): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
-  const active = getActiveInterface(ctx.db, {
+  const active = await getActiveInterface(ctx.db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
@@ -193,7 +193,7 @@ export async function saveCanvasAction(configInput: unknown): Promise<{ ok: bool
       error: `That layout is invalid: ${parsed.error.issues[0]?.message ?? "unknown error"}`,
     };
   }
-  saveVersion(ctx.db, {
+  await saveVersion(ctx.db, {
     interfaceId: active.iface.id,
     workspaceId: ctx.workspace.id,
     config: parsed.data,
@@ -234,7 +234,7 @@ export async function updatePreferencesAction(input: unknown): Promise<{ ok: boo
     reduceClutter: value.reduceClutter ?? false,
   };
 
-  db.prepare(
+  await db.prepare(
     `UPDATE user_preferences SET job_role = COALESCE(?, job_role), primary_goals = COALESCE(?, primary_goals),
        density = COALESCE(?, density), preferred_metrics = COALESCE(?, preferred_metrics),
        accessibility = ?, updated_at = ?
@@ -250,7 +250,7 @@ export async function updatePreferencesAction(input: unknown): Promise<{ ok: boo
     ctx.workspace.id,
   );
 
-  const active = getActiveInterface(db, {
+  const active = await getActiveInterface(db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
@@ -263,7 +263,7 @@ export async function updatePreferencesAction(input: unknown): Promise<{ ok: boo
       layout: { ...active.config.layout, density: value.density ?? active.config.layout.density },
       accessibility: { ...active.config.accessibility, ...accessibility },
     });
-    saveVersion(db, {
+    await saveVersion(db, {
       interfaceId: active.iface.id,
       workspaceId: ctx.workspace.id,
       config: next,
@@ -281,7 +281,7 @@ export async function dismissSuggestionAction(id: string): Promise<{ ok: boolean
   const ctx = await context();
   const dismissed = parseJson<string[]>(ctx.preferences.dismissed_suggestions ?? "[]", []);
   if (!dismissed.includes(id)) dismissed.push(id);
-  ctx.db
+  await ctx.db
     .prepare("UPDATE user_preferences SET dismissed_suggestions = ?, updated_at = ? WHERE user_id = ? AND workspace_id = ?")
     .run(JSON.stringify(dismissed.slice(-40)), nowIso(), ctx.user.id, ctx.workspace.id);
   revalidateStudio();
@@ -290,14 +290,14 @@ export async function dismissSuggestionAction(id: string): Promise<{ ok: boolean
 
 export async function switchInterfaceAction(interfaceId: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
-  const iface = getInterface(ctx.db, interfaceId);
+  const iface = await getInterface(ctx.db, interfaceId);
   if (!iface || iface.workspace_id !== ctx.workspace.id) {
     return { ok: false, error: "That interface is not in this workspace." };
   }
   if (iface.owner_id && iface.owner_id !== ctx.user.id) {
     return { ok: false, error: "That interface belongs to someone else." };
   }
-  ctx.db
+  await ctx.db
     .prepare("UPDATE user_preferences SET active_interface_id = ?, updated_at = ? WHERE user_id = ? AND workspace_id = ?")
     .run(interfaceId, nowIso(), ctx.user.id, ctx.workspace.id);
   revalidateStudio();
@@ -308,13 +308,13 @@ export async function applyTemplateAction(role: string): Promise<{ ok: boolean; 
   const ctx = await context();
   const parsed = z.enum(["sales_manager", "sales_rep", "ops_manager", "general"]).safeParse(role);
   if (!parsed.success) return { ok: false, error: "Unknown template." };
-  const active = getActiveInterface(ctx.db, {
+  const active = await getActiveInterface(ctx.db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: ctx.preferences.job_role as JobRole,
   });
-  saveVersion(ctx.db, {
+  await saveVersion(ctx.db, {
     interfaceId: active.iface.id,
     workspaceId: ctx.workspace.id,
     config: rolePresetConfig(parsed.data),
@@ -328,13 +328,13 @@ export async function applyTemplateAction(role: string): Promise<{ ok: boolean; 
 
 export async function resetToRolePresetAction(): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
-  const active = getActiveInterface(ctx.db, {
+  const active = await getActiveInterface(ctx.db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: ctx.preferences.job_role as JobRole,
   });
-  saveVersion(ctx.db, {
+  await saveVersion(ctx.db, {
     interfaceId: active.iface.id,
     workspaceId: ctx.workspace.id,
     config: rolePresetConfig(ctx.preferences.job_role as JobRole),
@@ -371,7 +371,7 @@ export async function runScenarioAction(scenarioId: string): Promise<DemoRunResu
     return { ok: false, error: `Demo runs are limited to ${limit.limit}/minute. Retry in ${limit.retryAfterSeconds}s.` };
   }
 
-  const demo = getInterfaceByKind(ctx.db, ctx.workspace.id, "demo");
+  const demo = await getInterfaceByKind(ctx.db, ctx.workspace.id, "demo");
   if (!demo) return { ok: false, error: "This workspace has no demo interface." };
 
   const outcome = await proposeTransformation({
@@ -396,7 +396,7 @@ export async function runScenarioAction(scenarioId: string): Promise<DemoRunResu
       engineLabel: proposal.engineLabel,
     };
   }
-  const applied = applyTransformation({
+  const applied = await applyTransformation({
     db: ctx.db,
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
@@ -404,7 +404,7 @@ export async function runScenarioAction(scenarioId: string): Promise<DemoRunResu
   });
   if (!applied.ok) return { ok: false, error: applied.error ?? "Could not apply the demo transformation." };
 
-  ctx.db.prepare(
+  await ctx.db.prepare(
     "INSERT INTO demo_runs (id, workspace_id, scenario, engine, status, created_at) VALUES (?, ?, ?, ?, 'applied', ?)",
   ).run(newId(), ctx.workspace.id, scenario.id, proposal.engine, nowIso());
 
@@ -427,9 +427,9 @@ export async function runScenarioAction(scenarioId: string): Promise<DemoRunResu
 
 export async function resetDemoAction(): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
-  const demo = getInterfaceByKind(ctx.db, ctx.workspace.id, "demo");
+  const demo = await getInterfaceByKind(ctx.db, ctx.workspace.id, "demo");
   if (!demo) return { ok: false, error: "This workspace has no demo interface." };
-  saveVersion(ctx.db, {
+  await saveVersion(ctx.db, {
     interfaceId: demo.iface.id,
     workspaceId: ctx.workspace.id,
     config: classicCrmConfig(),
@@ -437,7 +437,7 @@ export async function resetDemoAction(): Promise<{ ok: boolean; error?: string }
     source: "restore",
     userId: ctx.user.id,
   });
-  ctx.db
+  await ctx.db
     .prepare("DELETE FROM demo_runs WHERE workspace_id = ?")
     .run(ctx.workspace.id);
   revalidateStudio();
@@ -459,12 +459,12 @@ export async function createWorkflowAction(input: unknown): Promise<{
   if (!validated.ok) {
     return { ok: false, error: "That workflow is not valid.", issues: validated.issues };
   }
-  const existing = ctx.db
+  const existing = await ctx.db
     .prepare("SELECT id FROM workflow_definitions WHERE workspace_id = ? AND lower(name) = lower(?)")
     .get(ctx.workspace.id, validated.definition.name) as { id: string } | undefined;
 
   if (existing) {
-    ctx.db.prepare(
+    await ctx.db.prepare(
       "UPDATE workflow_definitions SET definition = ?, description = ?, trigger_type = ?, updated_at = ? WHERE id = ?",
     ).run(
       JSON.stringify(validated.definition),
@@ -478,7 +478,7 @@ export async function createWorkflowAction(input: unknown): Promise<{
   }
 
   const id = newId();
-  ctx.db.prepare(
+  await ctx.db.prepare(
     `INSERT INTO workflow_definitions (id, workspace_id, name, description, enabled, definition, trigger_type, created_by, created_at, updated_at, last_run_at)
      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL)`,
   ).run(
@@ -498,11 +498,11 @@ export async function createWorkflowAction(input: unknown): Promise<{
 
 export async function toggleWorkflowAction(workflowId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
   const ctx = await context();
-  const workflow = ctx.db
+  const workflow = await ctx.db
     .prepare("SELECT * FROM workflow_definitions WHERE id = ? AND workspace_id = ?")
     .get(workflowId, ctx.workspace.id) as WorkflowRow | undefined;
   if (!workflow) return { ok: false, error: "Workflow not found." };
-  ctx.db
+  await ctx.db
     .prepare("UPDATE workflow_definitions SET enabled = ?, updated_at = ? WHERE id = ?")
     .run(enabled ? 1 : 0, nowIso(), workflowId);
   revalidateStudio();
@@ -514,7 +514,7 @@ export async function runWorkflowNowAction(
   dryRun: boolean,
 ): Promise<{ ok: boolean; error?: string; matched?: number; summary?: string; logs?: unknown[] }> {
   const ctx = await context();
-  const workflow = ctx.db
+  const workflow = await ctx.db
     .prepare("SELECT * FROM workflow_definitions WHERE id = ? AND workspace_id = ?")
     .get(workflowId, ctx.workspace.id) as WorkflowRow | undefined;
   if (!workflow) return { ok: false, error: "Workflow not found." };
@@ -524,7 +524,7 @@ export async function runWorkflowNowAction(
   const definition = workflowDefinitionSchema.safeParse(parseJson(workflow.definition, null));
   if (!definition.success) return { ok: false, error: "This workflow definition is invalid." };
 
-  const result = runWorkflow({
+  const result = await runWorkflow({
     db: ctx.db,
     workflow,
     trigger: definition.data.trigger.type,
@@ -547,7 +547,7 @@ export async function runWorkflowNowAction(
 
 export async function runDailyChecksAction(): Promise<{ ok: boolean; results: Array<{ name: string; matched: number; status: string }> }> {
   const ctx = await context();
-  const results = runDailyChecks({
+  const results = await runDailyChecks({
     db: ctx.db,
     workspaceId: ctx.workspace.id,
     actorId: ctx.user.id,

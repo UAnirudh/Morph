@@ -9,14 +9,14 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
   reporter: [["list"]],
-  globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `npx next dev -H 0.0.0.0 -p ${PORT}`,
+    // Reset first: the database must not be unlinked while a server holds it open.
+    command: `node scripts/reset-e2e-db.mjs && npx next dev -H 0.0.0.0 -p ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 180_000,

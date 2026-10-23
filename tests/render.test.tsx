@@ -79,10 +79,10 @@ const CONFIG_INPUT = {
   ],
 } as const;
 
-function renderCanvas(overrides: { config?: MorphConfig; editable?: boolean } = {}) {
-  const ctx = seededContext();
+async function renderCanvas(overrides: { config?: MorphConfig; editable?: boolean } = {}) {
+  const ctx = await seededContext();
   const config = overrides.config ?? morphConfigSchema.parse(CONFIG_INPUT);
-  const data = resolveConfigData(ctx.db, ctx.scope, config.components);
+  const data = await resolveConfigData(ctx.db, ctx.scope, config.components);
   const { container } = render(
     <ToastProvider>
       <TooltipProvider>
@@ -106,8 +106,8 @@ function renderCanvas(overrides: { config?: MorphConfig; editable?: boolean } = 
 }
 
 describe("schema-driven renderer", () => {
-  it("renders every supported component type", () => {
-    renderCanvas();
+  it("renders every supported component type", async () => {
+    await renderCanvas();
     for (const title of [
       "Pipeline metric",
       "Revenue chart",
@@ -128,9 +128,9 @@ describe("schema-driven renderer", () => {
     }
   });
 
-  it("renders live workspace rows inside tables", () => {
-    const { container, ctx } = renderCanvas();
-    const firstLead = ctx.db
+  it("renders live workspace rows inside tables", async () => {
+    const { container, ctx } = await renderCanvas();
+    const firstLead = await ctx.db
       .prepare("SELECT name FROM leads WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1")
       .get(ctx.workspace.id) as { name: string };
     const table = screen.getByText("Lead table").closest("article")!;
@@ -138,18 +138,18 @@ describe("schema-driven renderer", () => {
     expect(container.querySelector("table")).toBeTruthy();
   });
 
-  it("exposes row actions with accessible labels", () => {
-    renderCanvas();
+  it("exposes row actions with accessible labels", async () => {
+    await renderCanvas();
     const table = screen.getByText("Lead table").closest("article")!;
     expect(within(table).getAllByLabelText("Mark contacted").length).toBeGreaterThan(0);
   });
 
-  it("hides drag affordances in read-only mode", () => {
-    renderCanvas({ editable: false });
+  it("hides drag affordances in read-only mode", async () => {
+    await renderCanvas({ editable: false });
     expect(screen.queryAllByLabelText(/^Reorder /)).toHaveLength(0);
   });
 
-  it("respects hidden and role visibility rules", () => {
+  it("respects hidden and role visibility rules", async () => {
     const config = morphConfigSchema.parse({
       ...CONFIG_INPUT,
       components: [
@@ -158,7 +158,7 @@ describe("schema-driven renderer", () => {
         { ...CONFIG_INPUT.components[7], id: "w-insight-manager", title: "Manager only", visibleFor: ["sales_manager"] },
       ],
     });
-    renderCanvas({ config });
+    await renderCanvas({ config });
     expect(screen.queryByText("Hidden metric")).toBeNull();
     expect(screen.getAllByText("Visible insight").length).toBeGreaterThan(0);
     // The seeded demo user is a sales manager, so the gated component renders.

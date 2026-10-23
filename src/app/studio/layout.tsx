@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "Studio" };
 export default async function StudioLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
-  const active = getActiveInterface(db, {
+  const active = await getActiveInterface(db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
@@ -21,9 +21,9 @@ export default async function StudioLayout({ children }: { children: React.React
   });
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
   const badges = {
-    overdue_followups: resolveMetric(db, scope, "overdue_followups"),
-    task_due_today: resolveMetric(db, scope, "task_due_today"),
-    flagged_leads: resolveMetric(db, scope, "flagged_leads"),
+    overdue_followups: await resolveMetric(db, scope, "overdue_followups"),
+    task_due_today: await resolveMetric(db, scope, "task_due_today"),
+    flagged_leads: await resolveMetric(db, scope, "flagged_leads"),
   };
 
   return (

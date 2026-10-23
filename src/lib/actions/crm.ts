@@ -43,7 +43,7 @@ async function scope() {
 }
 
 export async function createLeadAction(input: unknown): Promise<MutationResult<{ id: string }>> {
-  const result = createLead(await scope(), input);
+  const result = await createLead(await scope(), input);
   if (result.ok) revalidateWorkspace();
   return result;
 }
@@ -52,13 +52,13 @@ export async function updateLeadAction(
   leadId: string,
   patch: Record<string, unknown>,
 ): Promise<MutationResult> {
-  const result = updateLead(await scope(), leadId, patch);
+  const result = await updateLead(await scope(), leadId, patch);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function markLeadContactedAction(leadId: string): Promise<MutationResult> {
-  const result = markLeadContacted(await scope(), leadId);
+  const result = await markLeadContacted(await scope(), leadId);
   if (result.ok) revalidateWorkspace();
   return result;
 }
@@ -67,19 +67,19 @@ export async function setLeadStatusAction(
   leadId: string,
   status: "new" | "contacted" | "qualified" | "unqualified" | "converted",
 ): Promise<MutationResult> {
-  const result = setLeadStatus(await scope(), leadId, status);
+  const result = await setLeadStatus(await scope(), leadId, status);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function createFollowupTaskAction(leadId: string): Promise<MutationResult<{ id: string }>> {
-  const result = createFollowupTask(await scope(), leadId);
+  const result = await createFollowupTask(await scope(), leadId);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function advanceDealStageAction(dealId: string): Promise<MutationResult<{ stage: string }>> {
-  const result = advanceDealStage(await scope(), dealId);
+  const result = await advanceDealStage(await scope(), dealId);
   if (result.ok) revalidateWorkspace();
   return result;
 }
@@ -88,25 +88,25 @@ export async function setDealStageAction(
   dealId: string,
   stage: "prospecting" | "qualification" | "proposal" | "negotiation" | "won" | "lost",
 ): Promise<MutationResult<{ stage: string }>> {
-  const result = setDealStage(await scope(), dealId, stage);
+  const result = await setDealStage(await scope(), dealId, stage);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function createTaskAction(input: unknown): Promise<MutationResult<{ id: string }>> {
-  const result = createTask(await scope(), input);
+  const result = await createTask(await scope(), input);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function completeTaskAction(taskId: string): Promise<MutationResult> {
-  const result = completeTask(await scope(), taskId);
+  const result = await completeTask(await scope(), taskId);
   if (result.ok) revalidateWorkspace();
   return result;
 }
 
 export async function logActivityAction(input: unknown): Promise<MutationResult<{ id: string }>> {
-  const result = logActivity(await scope(), input);
+  const result = await logActivity(await scope(), input);
   if (result.ok) revalidateWorkspace();
   return result;
 }

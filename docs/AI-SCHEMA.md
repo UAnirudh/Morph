@@ -179,13 +179,18 @@ panel requires an explicit toggle before the engine will consider it.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | unset | Enables live generation; unset = deterministic local planner |
-| `MORPH_AI_MODEL` | `gpt-4o-mini` | Model name passed through; shown in the UI |
-| `MORPH_AI_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible endpoint (Azure, OpenRouter, vLLM, Ollama) |
+| `MORPH_AI_PROVIDER` | auto | `groq` or `openai`; forces one provider when both keys exist |
+| `OPENAI_API_KEY` | unset | OpenAI key; wins over Groq when both are set |
+| `GROQ_API_KEY` | unset | Groq key, used when no OpenAI key is present |
+| `MORPH_AI_MODEL` | `openai/gpt-oss-120b` on Groq, `gpt-4o-mini` on OpenAI | Model name passed through; shown in the UI |
+| `MORPH_AI_BASE_URL` | provider default | Any OpenAI-compatible endpoint (Azure, OpenRouter, vLLM, Ollama) |
 
-The request is a standard `POST /chat/completions` with `temperature: 0.2`,
-`response_format: { type: "json_object" }` where supported, and a 25 s timeout. Token
-usage and latency are written to `ai_usage` and shown in the panel.
+Both providers use the same `POST /chat/completions` request: `temperature: 0.2`,
+`response_format: { type: "json_object" }` where supported, and a 25 s timeout. If a model
+rejects JSON mode (HTTP 400) the request is retried once without it. Groq receives
+`max_completion_tokens` because it deprecates `max_tokens`; OpenAI receives `max_tokens`.
+Token usage, latency and the engine id (`openai` or `groq`) are written to `ai_usage` and
+shown in the panel.
 
 `PROMPT_VERSION` (`morph-transform-v3`) is stamped on every request and log line, so a
 change in prompt behavior is traceable to a deployment.

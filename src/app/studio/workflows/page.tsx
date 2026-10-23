@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { getWorkspaceContext } from "@/lib/auth/session";
 import { logEvent } from "@/lib/log";
-import { providerModel } from "@/lib/morph/provider";
+import { configuredEngineLabel } from "@/lib/morph/provider";
 import { workflowDefinitionSchema } from "@/lib/workflows/schema";
 import { WorkflowConsole, type WorkflowConsoleItem, type WorkflowRunItem } from "@/components/workflows/workflow-console";
 import type { WorkflowRow } from "@/lib/db/types";
@@ -15,7 +15,7 @@ export default async function WorkflowsPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
 
-  const rows = db
+  const rows = await db
     .prepare("SELECT * FROM workflow_definitions WHERE workspace_id = ? ORDER BY enabled DESC, updated_at DESC")
     .all(ctx.workspace.id) as WorkflowRow[];
 
@@ -30,7 +30,7 @@ export default async function WorkflowsPage() {
     }
     const definition = workflowDefinitionSchema.safeParse(parsed);
     if (!definition.success) continue;
-    const lastRun = db
+    const lastRun = await db
       .prepare("SELECT status FROM workflow_runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 1")
       .get(row.id) as { status: string } | undefined;
     workflows.push({
@@ -42,14 +42,14 @@ export default async function WorkflowsPage() {
       lastRunAt: row.last_run_at,
       updatedAt: row.updated_at,
       runCount:
-        (db.prepare("SELECT COUNT(*) AS c FROM workflow_runs WHERE workflow_id = ?").get(row.id) as {
+        (await db.prepare("SELECT COUNT(*) AS c FROM workflow_runs WHERE workflow_id = ?").get(row.id) as {
           c: number;
         }).c,
       lastRunStatus: lastRun?.status ?? null,
     });
   }
 
-  const runRows = db
+  const runRows = await db
     .prepare(
       `SELECT r.id, r.trigger_type AS triggerType, r.status, r.matched, r.actions, r.created_at AS createdAt,
               r.duration_ms AS durationMs, r.error, w.name AS workflowName
@@ -88,7 +88,7 @@ export default async function WorkflowsPage() {
     };
   });
 
-  const engineLabel = process.env.OPENAI_API_KEY ? providerModel() : "Local planner";
+  const engineLabel = configuredEngineLabel();
 
   return (
     <div className="px-4 py-5 lg:px-6">

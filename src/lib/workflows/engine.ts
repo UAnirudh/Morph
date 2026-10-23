@@ -5,7 +5,7 @@
  * Actions are limited to the allowlist in schema.ts — there is no code
  * execution, no shell, no arbitrary HTTP.
  */
-import type Database from "better-sqlite3";
+import type { Db, SqlArg } from "@/lib/db";
 import { newId, nowIso } from "@/lib/db";
 import type { WorkflowRow } from "@/lib/db/types";
 import { logError, logEvent } from "@/lib/log";
@@ -55,20 +55,20 @@ interface NormalizedRecord {
   flagged: boolean;
 }
 
-function isMember(db: Database.Database, workspaceId: string, userId: string | null): boolean {
+async function isMember(db: Db, workspaceId: string, userId: string | null): Promise<boolean> {
   if (!userId) return false;
-  const row = db
+  const row = await db
     .prepare("SELECT 1 AS ok FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
     .get(workspaceId, userId) as { ok: number } | undefined;
   return Boolean(row);
 }
 
-function loadRecords(
-  db: Database.Database,
+async function loadRecords(
+  db: Db,
   workspaceId: string,
   definition: WorkflowDefinition,
   recordIds?: string[],
-): NormalizedRecord[] {
+): Promise<NormalizedRecord[]> {
   const entity = definition.trigger.entity;
   const filterByIds =
     recordIds && recordIds.length > 0
@@ -77,12 +77,12 @@ function loadRecords(
   const params: unknown[] = [workspaceId, ...(recordIds ?? [])];
 
   if (entity === "lead") {
-    const rows = db
+    const rows = await db
       .prepare(
         `SELECT id, name, company, status, score, source, owner_id, last_contacted_at, updated_at, flagged
          FROM leads WHERE workspace_id = ?${filterByIds} ORDER BY updated_at DESC LIMIT ${MAX_RECORDS}`,
       )
-      .all(...params) as Array<Record<string, unknown>>;
+      .all(...(params as SqlArg[])) as Array<Record<string, unknown>>;
     return rows.map((row) => ({
       id: String(row.id),
       entity,
@@ -102,12 +102,12 @@ function loadRecords(
     }));
   }
   if (entity === "deal") {
-    const rows = db
+    const rows = await db
       .prepare(
         `SELECT id, name, stage, amount, probability, owner_id, updated_at
          FROM deals WHERE workspace_id = ?${filterByIds} ORDER BY updated_at DESC LIMIT ${MAX_RECORDS}`,
       )
-      .all(...params) as Array<Record<string, unknown>>;
+      .all(...(params as SqlArg[])) as Array<Record<string, unknown>>;
     return rows.map((row) => ({
       id: String(row.id),
       entity,
@@ -125,12 +125,12 @@ function loadRecords(
       flagged: false,
     }));
   }
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT id, title, status, priority, assignee_id, due_date, created_at
        FROM tasks WHERE workspace_id = ?${filterByIds} ORDER BY due_date ASC LIMIT ${MAX_RECORDS}`,
     )
-    .all(...params) as Array<Record<string, unknown>>;
+    .all(...(params as SqlArg[])) as Array<Record<string, unknown>>;
   return rows.map((row) => ({
     id: String(row.id),
     entity,
@@ -209,30 +209,30 @@ function interpolate(template: string, record: NormalizedRecord): string {
     .slice(0, 160);
 }
 
-function resolveAssignee(
-  db: Database.Database,
+async function resolveAssignee(
+  db: Db,
   workspaceId: string,
   mode: "owner" | "record_owner" | "me",
   record: NormalizedRecord,
   workflow: WorkflowRow,
   actorId: string,
-): string | null {
+): Promise<string | null> {
   const candidates: Array<string | null> =
     mode === "me" ? [actorId] : mode === "record_owner" ? [record.ownerId, workflow.created_by, actorId] : [workflow.created_by, actorId];
   for (const candidate of candidates) {
-    if (isMember(db, workspaceId, candidate)) return candidate;
+    if (await isMember(db, workspaceId, candidate)) return candidate;
   }
   return null;
 }
 
-function logActivity(
-  db: Database.Database,
+async function logActivity(
+  db: Db,
   workspaceId: string,
   record: NormalizedRecord,
   actorId: string,
   subject: string,
 ) {
-  db.prepare(
+  await db.prepare(
     `INSERT INTO activities (id, workspace_id, kind, subject, body, lead_id, deal_id, contact_id, actor_id, created_at)
      VALUES (?, ?, 'workflow', ?, ?, ?, ?, NULL, ?, ?)`,
   ).run(
@@ -247,8 +247,8 @@ function logActivity(
   );
 }
 
-function executeAction(
-  db: Database.Database,
+async function executeAction(
+  db: Db,
   params: {
     workspaceId: string;
     workflow: WorkflowRow;
@@ -258,23 +258,23 @@ function executeAction(
     now: Date;
     depth?: number;
   },
-): { applied: boolean; kind: keyof WorkflowRunResult["counts"] | null; note?: string } {
+): Promise<{ applied: boolean; kind: keyof WorkflowRunResult["counts"] | null; note?: string }> {
   const { workspaceId, workflow, record, action, actorId, now, depth = 0 } = params;
 
   switch (action.type) {
     case "create_task": {
       const title = interpolate(action.title, record);
       // Idempotency: do not create the same open follow-up twice.
-      const duplicate = db
+      const duplicate = await db
         .prepare(
           `SELECT id FROM tasks WHERE workspace_id = ? AND related_id = ? AND title = ? AND status != 'done' LIMIT 1`,
         )
         .get(workspaceId, record.id, title) as { id: string } | undefined;
       if (duplicate) return { applied: false, kind: "skipped", note: "Follow-up task already open" };
 
-      const assignee = resolveAssignee(db, workspaceId, action.assignTo, record, workflow, actorId);
+      const assignee = await resolveAssignee(db, workspaceId, action.assignTo, record, workflow, actorId);
       const due = new Date(now.getTime() + action.dueInDays * DAY).toISOString();
-      db.prepare(
+      await db.prepare(
         `INSERT INTO tasks (id, workspace_id, title, notes, status, priority, due_date, assignee_id, related_type, related_id, created_by, created_at, completed_at)
          VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, NULL)`,
       ).run(
@@ -304,7 +304,7 @@ function executeAction(
       }
       const table = record.entity === "lead" ? "leads" : record.entity === "deal" ? "deals" : "tasks";
       const column = action.field;
-      db.prepare(`UPDATE ${table} SET ${column} = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`).run(
+      await db.prepare(`UPDATE ${table} SET ${column} = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`).run(
         value,
         nowIso(),
         record.id,
@@ -339,31 +339,31 @@ function executeAction(
       if (record.flagged) {
         return { applied: false, kind: "skipped", note: "Lead already flagged" };
       }
-      db.prepare("UPDATE leads SET flagged = 1, flag_reason = ?, updated_at = ? WHERE id = ? AND workspace_id = ?").run(
+      await db.prepare("UPDATE leads SET flagged = 1, flag_reason = ?, updated_at = ? WHERE id = ? AND workspace_id = ?").run(
         action.reason,
         nowIso(),
         record.id,
         workspaceId,
       );
-      logActivity(db, workspaceId, record, actorId, `Flagged: ${action.reason}`);
+      await logActivity(db, workspaceId, record, actorId, `Flagged: ${action.reason}`);
       return { applied: true, kind: "flags" };
     }
     case "notify": {
-      const recipient = isMember(db, workspaceId, record.ownerId)
+      const recipient = (await isMember(db, workspaceId, record.ownerId))
         ? record.ownerId
-        : isMember(db, workspaceId, workflow.created_by)
+        : (await isMember(db, workspaceId, workflow.created_by))
           ? workflow.created_by
           : actorId;
       // Idempotency: one notification per record per day per workflow.
       const since = new Date(now.getTime() - DAY).toISOString();
-      const duplicate = db
+      const duplicate = await db
         .prepare(
           `SELECT id FROM notifications WHERE workspace_id = ? AND user_id = ? AND title = ? AND created_at >= ? LIMIT 1`,
         )
         .get(workspaceId, recipient, interpolate(action.title, record), since) as { id: string } | undefined;
       if (duplicate) return { applied: false, kind: "skipped", note: "Notification already sent today" };
 
-      db.prepare(
+      await db.prepare(
         `INSERT INTO notifications (id, workspace_id, user_id, title, body, kind, href, read_at, created_at)
          VALUES (?, ?, ?, ?, ?, 'workflow', '/studio', NULL, ?)`,
       ).run(
@@ -381,8 +381,8 @@ function executeAction(
   }
 }
 
-export function runWorkflow(params: {
-  db: Database.Database;
+export async function runWorkflow(params: {
+  db: Db;
   workflow: WorkflowRow;
   trigger: TriggerType;
   actorId: string;
@@ -391,7 +391,7 @@ export function runWorkflow(params: {
   now?: Date;
   dedupe?: boolean;
   depth?: number;
-}): WorkflowRunResult {
+}): Promise<WorkflowRunResult> {
   const { db, workflow, trigger, actorId, dryRun = false, dedupe = true } = params;
   const now = params.now ?? new Date();
   const started = Date.now();
@@ -406,7 +406,7 @@ export function runWorkflow(params: {
     durationMs: 0,
   };
 
-  if (!isMember(db, workflow.workspace_id, actorId)) {
+  if (!(await isMember(db, workflow.workspace_id, actorId))) {
     return { ...base, error: "Actor is not a member of this workspace", status: "failed" };
   }
 
@@ -419,7 +419,7 @@ export function runWorkflow(params: {
   const dayBucket = now.toISOString().slice(0, 10);
   const dedupeKey = dedupe ? `${trigger}:${dayBucket}` : null;
   if (dedupeKey) {
-    const existing = db
+    const existing = await db
       .prepare("SELECT id FROM workflow_runs WHERE workflow_id = ? AND dedupe_key = ?")
       .get(workflow.id, dedupeKey) as { id: string } | undefined;
     if (existing) {
@@ -439,7 +439,7 @@ export function runWorkflow(params: {
     }
   }
 
-  const records = loadRecords(db, workflow.workspace_id, definition, params.recordIds);
+  const records = await loadRecords(db, workflow.workspace_id, definition, params.recordIds);
   const matched = records.filter((record) => matchesWorkflow(definition, record, workflow, now));
   base.matched = matched.length;
 
@@ -455,7 +455,7 @@ export function runWorkflow(params: {
         continue;
       }
       try {
-        const outcome = executeAction(db, {
+        const outcome = await executeAction(db, {
           workspaceId: workflow.workspace_id,
           workflow,
           record,
@@ -487,7 +487,7 @@ export function runWorkflow(params: {
 
   const runId = newId();
   try {
-    db.prepare(
+    await db.prepare(
       `INSERT INTO workflow_runs (id, workspace_id, workflow_id, trigger_type, status, matched, actions, log, dedupe_key, error, duration_ms, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -504,7 +504,7 @@ export function runWorkflow(params: {
       Date.now() - started,
       nowIso(),
     );
-    db.prepare("UPDATE workflow_definitions SET last_run_at = ? WHERE id = ?").run(nowIso(), workflow.id);
+    await db.prepare("UPDATE workflow_definitions SET last_run_at = ? WHERE id = ?").run(nowIso(), workflow.id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("UNIQUE")) {
@@ -539,17 +539,17 @@ export function runWorkflow(params: {
 }
 
 /** Called by CRM mutations after a comparable write. */
-export function runWorkflowsForTrigger(params: {
-  db: Database.Database;
+export async function runWorkflowsForTrigger(params: {
+  db: Db;
   workspaceId: string;
   trigger: TriggerType;
   recordId?: string;
   actorId: string;
   depth?: number;
-}): WorkflowRunResult[] {
+}): Promise<WorkflowRunResult[]> {
   const { db, workspaceId, trigger, recordId, actorId } = params;
   const depth = params.depth ?? 0;
-  const workflows = db
+  const workflows = await db
     .prepare(
       "SELECT * FROM workflow_definitions WHERE workspace_id = ? AND enabled = 1 AND trigger_type = ?",
     )
@@ -558,7 +558,7 @@ export function runWorkflowsForTrigger(params: {
   const results: WorkflowRunResult[] = [];
   for (const workflow of workflows) {
     results.push(
-      runWorkflow({
+      await runWorkflow({
         db,
         workflow,
         trigger,
@@ -572,25 +572,29 @@ export function runWorkflowsForTrigger(params: {
   return results;
 }
 
-export function runDailyChecks(params: {
-  db: Database.Database;
+export async function runDailyChecks(params: {
+  db: Db;
   workspaceId: string;
   actorId: string;
   dryRun?: boolean;
-}): WorkflowRunResult[] {
-  const workflows = params.db
+}): Promise<WorkflowRunResult[]> {
+  const workflows = await params.db
     .prepare(
       "SELECT * FROM workflow_definitions WHERE workspace_id = ? AND enabled = 1 AND trigger_type = 'daily_check'",
     )
     .all(params.workspaceId) as WorkflowRow[];
-  return workflows.map((workflow) =>
-    runWorkflow({
-      db: params.db,
-      workflow,
-      trigger: "daily_check",
-      actorId: params.actorId,
-      dryRun: params.dryRun,
-      dedupe: !params.dryRun,
-    }),
-  );
+  const results: WorkflowRunResult[] = [];
+  for (const workflow of workflows) {
+    results.push(
+      await runWorkflow({
+        db: params.db,
+        workflow,
+        trigger: "daily_check",
+        actorId: params.actorId,
+        dryRun: params.dryRun,
+        dedupe: !params.dryRun,
+      }),
+    );
+  }
+  return results;
 }

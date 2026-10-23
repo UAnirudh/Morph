@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { isProviderConfigured, providerModel } from "@/lib/morph/provider";
+import { getDb, resolveDbConfig } from "@/lib/db";
+import { isProviderConfigured, resolveProvider } from "@/lib/morph/provider";
 import { PROMPT_VERSION } from "@/lib/morph/prompt";
 
 export const dynamic = "force-dynamic";
@@ -8,12 +8,15 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const db = getDb();
-    const row = db.prepare("SELECT COUNT(*) AS users FROM users").get() as { users: number };
+    const row = (await db.prepare<[], { users: number }>("SELECT COUNT(*) AS users FROM users").get())!;
+    const provider = resolveProvider();
     return NextResponse.json({
       status: "ok",
-      database: "sqlite",
+      // "file" locally, "remote" on Turso — never the URL or token.
+      database: resolveDbConfig().kind === "remote" ? "libsql-remote" : "libsql-file",
       users: row.users,
-      engine: isProviderConfigured() ? providerModel() : "local-planner",
+      engine: isProviderConfigured() ? provider!.model : "local-planner",
+      provider: provider?.id ?? "none",
       promptVersion: PROMPT_VERSION,
       time: new Date().toISOString(),
     });

@@ -19,10 +19,10 @@ them together, and the trade-offs behind them.
 │  lib/workflows/*(schema + execution engine)                              │
 │  lib/crm/*      (dataset resolvers, metric resolvers, mutations)         │
 │  lib/auth/*     (sessions, password hashing, workspace context)          │
-│  lib/db/*       (SQLite connection, migrations, seed)                    │
+│  lib/db/*       (libSQL adapter, migrations, seed)                       │
 └──────────────────────────────────────────┬───────────────────────────────┘
-                                           │ better-sqlite3 (WAL)
-                                    data/morph.db
+                    ┌──────────────────────┴──────────────────────┐
+            local dev: file:./data/morph.db        production: Turso (libsql://)
 ```
 
 ## 1. Layers and why they exist
@@ -209,9 +209,12 @@ live call that exists is the opt-in provider smoke test.
 
 ## 8. Trade-offs
 
-- **SQLite over Postgres.** Zero-config demo, single-file backup, trivially reproducible
-  seed. The cost is one writer and no horizontal scaling; the data layer is isolated so
-  the swap is mechanical.
+- **SQLite over Postgres, through libSQL.** Zero-config demo, single-file backup,
+  trivially reproducible seed — and the same SQL runs on Turso, which is what allows a
+  serverless host with an ephemeral filesystem. The cost is one writer and an HTTP round
+  trip per statement in production; the data layer is isolated so a Postgres swap stays
+  mechanical. The adapter (`src/lib/db`) is promise-based, so the whole read path is
+  `await`ed rather than sync.
 - **Server actions over a REST API.** Fewer moving parts and no client-side token
   handling; the cost is no third-party API surface. `/api/workflows/run` exists because a
   cron needs a URL.

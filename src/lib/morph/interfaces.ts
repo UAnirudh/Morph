@@ -1,5 +1,5 @@
 import "server-only";
-import type Database from "better-sqlite3";
+import type { Db } from "@/lib/db";
 import { newId, nowIso, parseJson } from "@/lib/db";
 import type {
   InterfaceRow,
@@ -30,19 +30,19 @@ export function parseStoredConfig(raw: string, fallback: MorphConfig): MorphConf
   return parsed.data;
 }
 
-export function getInterface(db: Database.Database, interfaceId: string): InterfaceRow | null {
+export async function getInterface(db: Db, interfaceId: string): Promise<InterfaceRow | null> {
   return (
-    (db.prepare("SELECT * FROM interfaces WHERE id = ?").get(interfaceId) as InterfaceRow | undefined) ??
+    (await db.prepare("SELECT * FROM interfaces WHERE id = ?").get(interfaceId) as InterfaceRow | undefined) ??
     null
   );
 }
 
-export function getCurrentVersion(
-  db: Database.Database,
+export async function getCurrentVersion(
+  db: Db,
   interfaceId: string,
-): InterfaceVersionRow | null {
+): Promise<InterfaceVersionRow | null> {
   return (
-    (db
+    (await db
       .prepare(
         "SELECT * FROM interface_versions WHERE interface_id = ? AND is_current = 1 ORDER BY version DESC LIMIT 1",
       )
@@ -50,20 +50,20 @@ export function getCurrentVersion(
   );
 }
 
-export function getSnapshot(db: Database.Database, interfaceId: string): InterfaceSnapshot | null {
-  const iface = getInterface(db, interfaceId);
+export async function getSnapshot(db: Db, interfaceId: string): Promise<InterfaceSnapshot | null> {
+  const iface = await getInterface(db, interfaceId);
   if (!iface) return null;
-  const version = getCurrentVersion(db, interfaceId);
+  const version = await getCurrentVersion(db, interfaceId);
   if (!version) return null;
   const config = parseStoredConfig(version.config, rolePresetConfig("general"));
   return { iface, version, config };
 }
 
-export function ensurePersonalInterface(
-  db: Database.Database,
+export async function ensurePersonalInterface(
+  db: Db,
   input: { workspaceId: string; userId: string; jobRole: JobRole },
-): InterfaceRow {
-  const existing = db
+): Promise<InterfaceRow> {
+  const existing = await db
     .prepare(
       "SELECT * FROM interfaces WHERE workspace_id = ? AND owner_id = ? AND kind = 'personal' LIMIT 1",
     )
@@ -73,11 +73,11 @@ export function ensurePersonalInterface(
   const id = newId();
   const now = nowIso();
   const config = rolePresetConfig(input.jobRole);
-  db.prepare(
+  await db.prepare(
     `INSERT INTO interfaces (id, workspace_id, name, slug, kind, owner_id, is_default, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'personal', ?, 0, ?, ?)`,
   ).run(id, input.workspaceId, config.name, `personal-${input.userId.slice(0, 6)}`, input.userId, now, now);
-  db.prepare(
+  await db.prepare(
     `INSERT INTO interface_versions (id, interface_id, workspace_id, version, config, summary, source, created_by, is_current, created_at)
      VALUES (?, ?, ?, 1, ?, ?, 'template', ?, 1, ?)`,
   ).run(
@@ -89,41 +89,43 @@ export function ensurePersonalInterface(
     input.userId,
     now,
   );
-  return getInterface(db, id)!;
+  return getInterface(db, id) as Promise<InterfaceRow>;
 }
 
-export function getActiveInterface(
-  db: Database.Database,
+export async function getActiveInterface(
+  db: Db,
   input: { workspaceId: string; userId: string; preferences: PreferencesRow; jobRole: JobRole },
-): InterfaceSnapshot {
+): Promise<InterfaceSnapshot> {
   let interfaceId = input.preferences.active_interface_id;
-  const active = interfaceId ? getSnapshot(db, interfaceId) : null;
+  const active = interfaceId ? await getSnapshot(db, interfaceId) : null;
   if (active && active.iface.workspace_id === input.workspaceId) return active;
 
-  const personal = ensurePersonalInterface(db, {
+  const personal = await ensurePersonalInterface(db, {
     workspaceId: input.workspaceId,
     userId: input.userId,
     jobRole: input.jobRole,
   });
-  db.prepare(
-    "UPDATE user_preferences SET active_interface_id = ?, updated_at = ? WHERE user_id = ? AND workspace_id = ?",
-  ).run(personal.id, nowIso(), input.userId, input.workspaceId);
-  return getSnapshot(db, personal.id)!;
+  await db
+    .prepare(
+      "UPDATE user_preferences SET active_interface_id = ?, updated_at = ? WHERE user_id = ? AND workspace_id = ?",
+    )
+    .run(personal.id, nowIso(), input.userId, input.workspaceId);
+  return (await getSnapshot(db, personal.id))!;
 }
 
-export function getInterfaceByKind(
-  db: Database.Database,
+export async function getInterfaceByKind(
+  db: Db,
   workspaceId: string,
   kind: "baseline" | "demo",
-): InterfaceSnapshot | null {
-  const row = db
+): Promise<InterfaceSnapshot | null> {
+  const row = await db
     .prepare("SELECT id FROM interfaces WHERE workspace_id = ? AND kind = ? ORDER BY created_at ASC LIMIT 1")
     .get(workspaceId, kind) as { id: string } | undefined;
-  return row ? getSnapshot(db, row.id) : null;
+  return row ? await getSnapshot(db, row.id) : null;
 }
 
-export function saveVersion(
-  db: Database.Database,
+export async function saveVersion(
+  db: Db,
   input: {
     interfaceId: string;
     workspaceId: string;
@@ -132,17 +134,17 @@ export function saveVersion(
     source: VersionSource;
     userId: string;
   },
-): InterfaceSnapshot {
+): Promise<InterfaceSnapshot> {
   const validated = morphConfigSchema.parse(input.config);
-  const latest = db
+  const latest = await db
     .prepare("SELECT MAX(version) AS v FROM interface_versions WHERE interface_id = ?")
     .get(input.interfaceId) as { v: number | null };
   const nextVersion = (latest.v ?? 0) + 1;
   const id = newId();
   const now = nowIso();
-  const run = db.transaction(() => {
-    db.prepare("UPDATE interface_versions SET is_current = 0 WHERE interface_id = ?").run(input.interfaceId);
-    db.prepare(
+  const run = db.transaction(async (db) => {
+    await db.prepare("UPDATE interface_versions SET is_current = 0 WHERE interface_id = ?").run(input.interfaceId);
+    await db.prepare(
       `INSERT INTO interface_versions (id, interface_id, workspace_id, version, config, summary, source, created_by, is_current, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     ).run(
@@ -156,22 +158,22 @@ export function saveVersion(
       input.userId,
       now,
     );
-    db.prepare("UPDATE interfaces SET name = ?, updated_at = ? WHERE id = ?").run(
+    await db.prepare("UPDATE interfaces SET name = ?, updated_at = ? WHERE id = ?").run(
       validated.name,
       now,
       input.interfaceId,
     );
   });
-  run();
-  return getSnapshot(db, input.interfaceId)!;
+  await run;
+  return (await getSnapshot(db, input.interfaceId))!;
 }
 
-export function listVersions(
-  db: Database.Database,
+export async function listVersions(
+  db: Db,
   interfaceId: string,
   limit = 25,
-): Array<InterfaceVersionRow & { createdByName: string | null }> {
-  return db
+): Promise<Array<InterfaceVersionRow & { createdByName: string | null }>> {
+  return await db
     .prepare(
       `SELECT v.*, u.name AS createdByName FROM interface_versions v
        LEFT JOIN users u ON u.id = v.created_by
@@ -180,12 +182,12 @@ export function listVersions(
     .all(interfaceId, limit) as Array<InterfaceVersionRow & { createdByName: string | null }>;
 }
 
-export function listWorkspaceInterfaces(
-  db: Database.Database,
+export async function listWorkspaceInterfaces(
+  db: Db,
   workspaceId: string,
   userId: string,
 ) {
-  return db
+  return await db
     .prepare(
       `SELECT i.*, u.name AS ownerName,
          (SELECT COUNT(*) FROM interface_versions v WHERE v.interface_id = i.id) AS versionCount,
@@ -203,14 +205,14 @@ export function listWorkspaceInterfaces(
   >;
 }
 
-export function previousVersion(
-  db: Database.Database,
+export async function previousVersion(
+  db: Db,
   interfaceId: string,
-): InterfaceVersionRow | null {
-  const current = getCurrentVersion(db, interfaceId);
+): Promise<InterfaceVersionRow | null> {
+  const current = await getCurrentVersion(db, interfaceId);
   if (!current) return null;
   return (
-    (db
+    (await db
       .prepare(
         "SELECT * FROM interface_versions WHERE interface_id = ? AND version < ? ORDER BY version DESC LIMIT 1",
       )
@@ -219,11 +221,11 @@ export function previousVersion(
 }
 
 /** Undo = re-apply the previous config as a new version, never history rewriting. */
-export function undoLastChange(
-  db: Database.Database,
+export async function undoLastChange(
+  db: Db,
   input: { interfaceId: string; workspaceId: string; userId: string },
-): InterfaceSnapshot {
-  const previous = previousVersion(db, input.interfaceId);
+): Promise<InterfaceSnapshot> {
+  const previous = await previousVersion(db, input.interfaceId);
   if (!previous) {
     throw new Error("There is no earlier version to undo to.");
   }
@@ -238,11 +240,11 @@ export function undoLastChange(
   });
 }
 
-export function restoreVersion(
-  db: Database.Database,
+export async function restoreVersion(
+  db: Db,
   input: { versionId: string; workspaceId: string; userId: string },
-): InterfaceSnapshot {
-  const version = db
+): Promise<InterfaceSnapshot> {
+  const version = await db
     .prepare("SELECT * FROM interface_versions WHERE id = ? AND workspace_id = ?")
     .get(input.versionId, input.workspaceId) as InterfaceVersionRow | undefined;
   if (!version) throw new Error("That version does not exist in this workspace.");
@@ -273,7 +275,7 @@ export interface VersionSummaryDTO {
 }
 
 export function toVersionDTO(
-  db: Database.Database,
+  db: Db,
   row: InterfaceVersionRow & { createdByName?: string | null },
 ): VersionSummaryDTO {
   const parsed = morphConfigSchema.safeParse(parseJson<unknown>(row.config, null));

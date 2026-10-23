@@ -21,14 +21,14 @@ export default async function LeadsPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
-  const rows = resolveRecordDataset(db, scope, "leads").rows;
+  const rows = (await resolveRecordDataset(db, scope, "leads")).rows;
   const fields = datasetFields("leads").filter((field) => COLUMNS.includes(field.key));
 
   const metrics: RecordMetric[] = [
-    { label: "Active leads", value: resolveMetric(db, scope, "active_leads"), format: "number", hint: "New, contacted or qualified" },
-    { label: "Lead conversion", value: resolveMetric(db, scope, "lead_conversion"), format: "percent", hint: "Qualified ÷ all leads" },
-    { label: "Overdue follow-ups", value: resolveMetric(db, scope, "overdue_followups"), format: "number", hint: "No contact in 7+ days" },
-    { label: "Flagged by automation", value: resolveMetric(db, scope, "flagged_leads"), format: "number", hint: "Set by workflows" },
+    { label: "Active leads", value: await resolveMetric(db, scope, "active_leads"), format: "number", hint: "New, contacted or qualified" },
+    { label: "Lead conversion", value: await resolveMetric(db, scope, "lead_conversion"), format: "percent", hint: "Qualified ÷ all leads" },
+    { label: "Overdue follow-ups", value: await resolveMetric(db, scope, "overdue_followups"), format: "number", hint: "No contact in 7+ days" },
+    { label: "Flagged by automation", value: await resolveMetric(db, scope, "flagged_leads"), format: "number", hint: "Set by workflows" },
   ];
 
   return (
@@ -44,10 +44,10 @@ export default async function LeadsPage() {
       rowActions={["mark_lead_contacted", "qualify_lead", "create_followup_task"]}
       emptyHint="No leads yet — create one to see it appear across every interface."
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
     />
   );

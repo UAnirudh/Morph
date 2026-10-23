@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function SavedInterfacesPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
-  const interfaces = listWorkspaceInterfaces(db, ctx.workspace.id, ctx.user.id);
+  const interfaces = await listWorkspaceInterfaces(db, ctx.workspace.id, ctx.user.id);
 
   return (
     <div className="px-4 py-5 lg:px-6">

@@ -21,14 +21,14 @@ export default async function TasksPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
-  const rows = resolveRecordDataset(db, scope, "tasks").rows;
+  const rows = (await resolveRecordDataset(db, scope, "tasks")).rows;
   const fields = datasetFields("tasks").filter((field) => COLUMNS.includes(field.key));
 
   const metrics: RecordMetric[] = [
-    { label: "Open tasks", value: resolveMetric(db, scope, "team_workload"), format: "number", hint: "Across the team" },
-    { label: "Due today", value: resolveMetric(db, scope, "task_due_today"), format: "number", hint: "Still open" },
-    { label: "My open tasks", value: resolveMetric(db, scope, "my_open_tasks"), format: "number", hint: "Assigned to you" },
-    { label: "Done this week", value: resolveMetric(db, scope, "tasks_completed_week"), format: "number", hint: "Last 7 days" },
+    { label: "Open tasks", value: await resolveMetric(db, scope, "team_workload"), format: "number", hint: "Across the team" },
+    { label: "Due today", value: await resolveMetric(db, scope, "task_due_today"), format: "number", hint: "Still open" },
+    { label: "My open tasks", value: await resolveMetric(db, scope, "my_open_tasks"), format: "number", hint: "Assigned to you" },
+    { label: "Done this week", value: await resolveMetric(db, scope, "tasks_completed_week"), format: "number", hint: "Last 7 days" },
   ];
 
   return (
@@ -44,10 +44,10 @@ export default async function TasksPage() {
       rowActions={["complete_task"]}
       emptyHint="No tasks match that filter."
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
     />
   );

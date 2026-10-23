@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db, SqlArg } from "@/lib/db";
 import {
   CHART_DATASET_KEYS,
   RECORD_DATASET_KEYS,
@@ -40,12 +40,12 @@ export interface ConfigData {
   generatedAt: string;
 }
 
-function all<T>(db: Database.Database, sql: string, params: unknown[] = []): T[] {
-  return db.prepare(sql).all(...params) as T[];
+function all<T>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
+  return db.prepare<SqlArg[], T>(sql).all(...(params as SqlArg[]));
 }
 
-function one<T>(db: Database.Database, sql: string, params: unknown[] = []): T | undefined {
-  return db.prepare(sql).get(...params) as T | undefined;
+function one<T>(db: Db, sql: string, params: unknown[] = []): Promise<T | undefined> {
+  return db.prepare<SqlArg[], T>(sql).get(...(params as SqlArg[]));
 }
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -168,12 +168,12 @@ function taskRows(rows: TaskBase[]): RecordRow[] {
 
 const OPEN_LEAD_STATUSES = `('new','contacted','qualified')`;
 
-export function resolveRecordDataset(
-  db: Database.Database,
+export async function resolveRecordDataset(
+  db: Db,
   scope: DataScope,
   key: RecordDataset,
   now = new Date(),
-): DatasetResult {
+): Promise<DatasetResult> {
   const { workspaceId, userId } = scope;
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString();
   const todayStart = startOfDay(now);
@@ -207,7 +207,7 @@ export function resolveRecordDataset(
           : key === "priority_leads"
             ? "l.score DESC, l.last_contacted_at ASC"
             : "l.updated_at DESC";
-      const rows = all<LeadBase>(db, `${LEAD_SELECT} WHERE ${where} ORDER BY ${order} LIMIT 200`, params);
+      const rows = await all<LeadBase>(db, `${LEAD_SELECT} WHERE ${where} ORDER BY ${order} LIMIT 200`, params);
       return {
         key,
         label: datasetLabel(key),
@@ -225,7 +225,7 @@ export function resolveRecordDataset(
         where += " AND d.stage NOT IN ('won','lost') AND d.updated_at < ?";
         params.push(new Date(now.getTime() - 21 * DAY).toISOString());
       }
-      const rows = all<DealBase>(
+      const rows = await all<DealBase>(
         db,
         `${DEAL_SELECT} WHERE ${where} ORDER BY ${
           key === "at_risk_deals" ? "d.updated_at ASC" : "d.amount DESC"
@@ -258,7 +258,7 @@ export function resolveRecordDataset(
         where += " AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date < ?";
         params.push(todayStart.toISOString());
       }
-      const rows = all<TaskBase>(
+      const rows = await all<TaskBase>(
         db,
         `${TASK_SELECT} WHERE ${where} ORDER BY ${
           key === "today_tasks" ? "t.priority DESC, t.due_date ASC" : "t.due_date ASC"
@@ -274,7 +274,7 @@ export function resolveRecordDataset(
       };
     }
     case "companies": {
-      const rows = all<{
+      const rows = await all<{
         id: string;
         name: string;
         industry: string;
@@ -299,7 +299,7 @@ export function resolveRecordDataset(
       };
     }
     case "contacts": {
-      const rows = all<{
+      const rows = await all<{
         id: string;
         name: string;
         title: string | null;
@@ -323,7 +323,7 @@ export function resolveRecordDataset(
       };
     }
     case "activities": {
-      const rows = all<{
+      const rows = await all<{
         id: string;
         subject: string;
         kind: string;
@@ -346,7 +346,7 @@ export function resolveRecordDataset(
       };
     }
     case "workflows": {
-      const rows = all<{
+      const rows = await all<{
         id: string;
         name: string;
         triggerType: string;
@@ -379,12 +379,12 @@ export function resolveRecordDataset(
 
 const OPEN_STAGES = ["prospecting", "qualification", "proposal", "negotiation"] as const;
 
-export function resolveChartDataset(
-  db: Database.Database,
+export async function resolveChartDataset(
+  db: Db,
   scope: DataScope,
   key: ChartDataset,
   now = new Date(),
-): DatasetResult {
+): Promise<DatasetResult> {
   const { workspaceId, userId } = scope;
   const fields = datasetFields(key);
   let rows: RecordRow[] = [];
@@ -395,7 +395,7 @@ export function resolveChartDataset(
       for (let i = 7; i >= 0; i -= 1) {
         const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-        const agg = one<{ revenue: number; deals: number }>(
+        const agg = await one<{ revenue: number; deals: number }>(
           db,
           `SELECT COALESCE(SUM(amount),0) AS revenue, COUNT(*) AS deals FROM deals
            WHERE workspace_id = ? AND stage = 'won' AND closed_at >= ? AND closed_at < ?`,
@@ -411,32 +411,35 @@ export function resolveChartDataset(
       break;
     }
     case "deals_by_stage": {
-      rows = [...OPEN_STAGES, "won", "lost"].map((stage) => {
-        const agg = one<{ count: number; value: number }>(
+      rows = [];
+      for (const stage of [...OPEN_STAGES, "won", "lost"]) {
+        const agg = await one<{ count: number; value: number }>(
           db,
           `SELECT COUNT(*) AS count, COALESCE(SUM(amount),0) AS value FROM deals WHERE workspace_id = ? AND stage = ?`,
           [workspaceId, stage],
         );
-        return {
+        rows.push({
           stage: titleCase(stage),
           count: agg?.count ?? 0,
           value: Math.round(agg?.value ?? 0),
-        };
-      });
+        });
+      }
       break;
     }
     case "leads_by_source": {
-      rows = all<{ source: string; count: number; converted: number }>(
-        db,
-        `SELECT source, COUNT(*) AS count,
-           SUM(CASE WHEN status IN ('qualified','converted') THEN 1 ELSE 0 END) AS converted
-         FROM leads WHERE workspace_id = ? GROUP BY source ORDER BY count DESC`,
-        [workspaceId],
+      rows = (
+        await all<{ source: string; count: number; converted: number }>(
+          db,
+          `SELECT source, COUNT(*) AS count,
+             SUM(CASE WHEN status IN ('qualified','converted') THEN 1 ELSE 0 END) AS converted
+           FROM leads WHERE workspace_id = ? GROUP BY source ORDER BY count DESC`,
+          [workspaceId],
+        )
       ).map((row) => ({ ...row, source: titleCase(row.source) }));
       break;
     }
     case "conversion_funnel": {
-      const counts = all<{ status: string; count: number }>(
+      const counts = await all<{ status: string; count: number }>(
         db,
         "SELECT status, COUNT(*) AS count FROM leads WHERE workspace_id = ? GROUP BY status",
         [workspaceId],
@@ -456,7 +459,7 @@ export function resolveChartDataset(
       break;
     }
     case "task_status": {
-      const counts = all<{ status: string; count: number }>(
+      const counts = await all<{ status: string; count: number }>(
         db,
         "SELECT status, COUNT(*) AS count FROM tasks WHERE workspace_id = ? GROUP BY status",
         [workspaceId],
@@ -470,7 +473,7 @@ export function resolveChartDataset(
       break;
     }
     case "workload_by_owner": {
-      rows = all<{ owner: string; openTasks: number; overdue: number; openDeals: number }>(
+      rows = await all<{ owner: string; openTasks: number; overdue: number; openDeals: number }>(
         db,
         `SELECT u.name AS owner,
            (SELECT COUNT(*) FROM tasks t WHERE t.assignee_id = u.id AND t.workspace_id = ? AND t.status != 'done') AS openTasks,
@@ -483,23 +486,26 @@ export function resolveChartDataset(
       break;
     }
     case "activity_trend": {
-      rows = Array.from({ length: 14 }, (_, index) => {
+      const days = Array.from({ length: 14 }, (_, index) => {
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (13 - index));
-        const end = new Date(start.getTime() + DAY);
-        const agg = one<{ count: number }>(
+        return { start, end: new Date(start.getTime() + DAY) };
+      });
+      rows = [];
+      for (const { start, end } of days) {
+        const agg = await one<{ count: number }>(
           db,
           "SELECT COUNT(*) AS count FROM activities WHERE workspace_id = ? AND created_at >= ? AND created_at < ?",
           [workspaceId, start.toISOString(), end.toISOString()],
         );
-        return {
+        rows.push({
           day: start.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
           count: agg?.count ?? 0,
-        };
-      });
+        });
+      }
       break;
     }
     case "pipeline_aging": {
-      const deals = all<{ amount: number; updatedAt: string }>(
+      const deals = await all<{ amount: number; updatedAt: string }>(
         db,
         "SELECT amount, updated_at AS updatedAt FROM deals WHERE workspace_id = ? AND stage NOT IN ('won','lost')",
         [workspaceId],
@@ -530,12 +536,12 @@ export function resolveChartDataset(
   return { key, label: datasetLabel(key), rows, fields, total: rows.length };
 }
 
-export function resolveDataset(
-  db: Database.Database,
+export async function resolveDataset(
+  db: Db,
   scope: DataScope,
   key: DatasetKey,
   now = new Date(),
-): DatasetResult {
+): Promise<DatasetResult> {
   if ((RECORD_DATASET_KEYS as string[]).includes(key)) {
     return resolveRecordDataset(db, scope, key as RecordDataset, now);
   }
@@ -549,41 +555,41 @@ export function resolveDataset(
 /* Metrics                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export function resolveMetric(
-  db: Database.Database,
+export async function resolveMetric(
+  db: Db,
   scope: DataScope,
   key: MetricKey,
   now = new Date(),
-): number {
+): Promise<number> {
   const { workspaceId, userId } = scope;
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString();
   const todayStart = startOfDay(now);
   const todayEnd = new Date(todayStart.getTime() + DAY);
-  const query = (sql: string, params: unknown[] = [workspaceId]) => {
-    const row = one<{ value: number }>(db, sql, params);
+  const query = async (sql: string, params: unknown[] = [workspaceId]) => {
+    const row = await one<{ value: number }>(db, sql, params);
     return row?.value ?? 0;
   };
 
   switch (key) {
     case "pipeline_value":
       return Math.round(
-        query(
+        await query(
           "SELECT COALESCE(SUM(amount),0) AS value FROM deals WHERE workspace_id = ? AND stage NOT IN ('won','lost')",
         ),
       );
     case "won_revenue":
       return Math.round(
-        query(
+        await query(
           "SELECT COALESCE(SUM(amount),0) AS value FROM deals WHERE workspace_id = ? AND stage = 'won' AND closed_at >= ?",
           [workspaceId, new Date(now.getTime() - 90 * DAY).toISOString()],
         ),
       );
     case "open_deals":
-      return query(
+      return await query(
         "SELECT COUNT(*) AS value FROM deals WHERE workspace_id = ? AND stage NOT IN ('won','lost')",
       );
     case "win_rate": {
-      const row = one<{ won: number; closed: number }>(
+      const row = await one<{ won: number; closed: number }>(
         db,
         `SELECT SUM(CASE WHEN stage = 'won' THEN 1 ELSE 0 END) AS won, COUNT(*) AS closed
          FROM deals WHERE workspace_id = ? AND stage IN ('won','lost')`,
@@ -593,34 +599,34 @@ export function resolveMetric(
       return Math.round(((row.won ?? 0) / row.closed) * 100);
     }
     case "overdue_followups":
-      return query(
+      return await query(
         `SELECT COUNT(*) AS value FROM leads WHERE workspace_id = ? AND last_contacted_at IS NOT NULL
          AND last_contacted_at < ? AND status IN ('new','contacted','qualified')`,
         [workspaceId, weekAgo],
       );
     case "task_due_today":
-      return query(
+      return await query(
         `SELECT COUNT(*) AS value FROM tasks WHERE workspace_id = ? AND status != 'done'
          AND due_date >= ? AND due_date < ?`,
         [workspaceId, todayStart.toISOString(), todayEnd.toISOString()],
       );
     case "my_open_tasks":
-      return query(
+      return await query(
         "SELECT COUNT(*) AS value FROM tasks WHERE workspace_id = ? AND assignee_id = ? AND status != 'done'",
         [workspaceId, userId],
       );
     case "avg_deal_size":
       return Math.round(
-        query(
+        await query(
           "SELECT COALESCE(AVG(amount),0) AS value FROM deals WHERE workspace_id = ? AND stage NOT IN ('won','lost')",
         ),
       );
     case "team_workload":
-      return query(
+      return await query(
         "SELECT COUNT(*) AS value FROM tasks WHERE workspace_id = ? AND status != 'done'",
       );
     case "lead_conversion": {
-      const row = one<{ total: number; converted: number }>(
+      const row = await one<{ total: number; converted: number }>(
         db,
         `SELECT COUNT(*) AS total,
            SUM(CASE WHEN status IN ('qualified','converted') THEN 1 ELSE 0 END) AS converted
@@ -633,21 +639,21 @@ export function resolveMetric(
     case "active_leads": {
       const ownerFilter = userId ? " AND owner_id = ?" : "";
       const params: unknown[] = userId ? [workspaceId, userId] : [workspaceId];
-      return query(
+      return await query(
         `SELECT COUNT(*) AS value FROM leads WHERE workspace_id = ?${ownerFilter} AND status IN ('new','contacted','qualified')`,
         params,
       );
     }
     case "at_risk_deals":
-      return query(
+      return await query(
         `SELECT COUNT(*) AS value FROM deals WHERE workspace_id = ? AND stage NOT IN ('won','lost')
          AND updated_at < ?`,
         [workspaceId, new Date(now.getTime() - 21 * DAY).toISOString()],
       );
     case "flagged_leads":
-      return query("SELECT COUNT(*) AS value FROM leads WHERE workspace_id = ? AND flagged = 1");
+      return await query("SELECT COUNT(*) AS value FROM leads WHERE workspace_id = ? AND flagged = 1");
     case "tasks_completed_week":
-      return query(
+      return await query(
         "SELECT COUNT(*) AS value FROM tasks WHERE workspace_id = ? AND status = 'done' AND completed_at >= ?",
         [workspaceId, weekAgo],
       );
@@ -686,23 +692,23 @@ export function metricsForComponents(
   return [...keys];
 }
 
-export function resolveConfigData(
-  db: Database.Database,
+export async function resolveConfigData(
+  db: Db,
   scope: DataScope,
   components: Array<{ type: string; dataset?: string; metric?: string }>,
   now = new Date(),
-): ConfigData {
+): Promise<ConfigData> {
   const data: ConfigData = { datasets: {}, metrics: {}, generatedAt: now.toISOString() };
   for (const key of datasetsForComponents(components)) {
     try {
-      data.datasets[key] = resolveDataset(db, scope, key, now);
+      data.datasets[key] = await resolveDataset(db, scope, key, now);
     } catch {
       // A component with an unsupported binding renders an inline error rather
       // than breaking the entire workspace.
     }
   }
   for (const key of metricsForComponents(components)) {
-    data.metrics[key] = resolveMetric(db, scope, key, now);
+    data.metrics[key] = await resolveMetric(db, scope, key, now);
   }
   return data;
 }

@@ -12,7 +12,7 @@ export default async function OnboardingPage() {
   if (!user) redirect("/login");
 
   const db = getDb();
-  const prefs = db
+  const prefs = await db
     .prepare("SELECT * FROM user_preferences WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1")
     .get(user.id) as PreferencesRow | undefined;
   if (prefs?.onboarding_complete === 1) redirect("/studio");

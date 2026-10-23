@@ -11,13 +11,13 @@ export const dynamic = "force-dynamic";
 export default async function VersionsPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
-  const active = getActiveInterface(db, {
+  const active = await getActiveInterface(db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: ctx.preferences.job_role as JobRole,
   });
-  const versions = listVersions(db, active.iface.id, 40).map((row) => toVersionDTO(db, row));
+  const versions = (await listVersions(db, active.iface.id, 40)).map((row) => toVersionDTO(db, row));
 
   return (
     <div className="px-4 py-5 lg:px-6">

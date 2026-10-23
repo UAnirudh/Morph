@@ -4,7 +4,7 @@ import { getWorkspaceContext } from "@/lib/auth/session";
 import { getActiveInterface, getInterfaceByKind } from "@/lib/morph/interfaces";
 import { resolveConfigData } from "@/lib/crm/data";
 import { DEMO_SCENARIOS } from "@/lib/demo";
-import { providerModel } from "@/lib/morph/provider";
+import { configuredEngineLabel } from "@/lib/morph/provider";
 import type { JobRole } from "@/lib/morph/config";
 import { CompareView } from "@/components/studio/compare-view";
 
@@ -17,14 +17,14 @@ export default async function ComparePage() {
   const role = ctx.preferences.job_role as JobRole;
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
 
-  const personal = getActiveInterface(db, {
+  const personal = await getActiveInterface(db, {
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     preferences: ctx.preferences,
     jobRole: role,
   });
-  const baseline = getInterfaceByKind(db, ctx.workspace.id, "baseline");
-  const demo = getInterfaceByKind(db, ctx.workspace.id, "demo");
+  const baseline = await getInterfaceByKind(db, ctx.workspace.id, "baseline");
+  const demo = await getInterfaceByKind(db, ctx.workspace.id, "demo");
 
   if (!baseline || !demo) {
     return (
@@ -37,7 +37,7 @@ export default async function ComparePage() {
     );
   }
 
-  const demoRuns = db
+  const demoRuns = await db
     .prepare(
       "SELECT scenario, engine, status, created_at AS createdAt FROM demo_runs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20",
     )
@@ -51,25 +51,25 @@ export default async function ComparePage() {
     <CompareView
       personal={{
         config: personal.config,
-        data: resolveConfigData(db, scope, personal.config.components),
+        data: await resolveConfigData(db, scope, personal.config.components),
         label: "After · your interface",
         caption: `${personal.iface.name} · version ${personal.version.version}`,
       }}
       baseline={{
         config: baseline.config,
-        data: resolveConfigData(db, scope, baseline.config.components),
+        data: await resolveConfigData(db, scope, baseline.config.components),
         label: "Before · classic CRM",
         caption: `${baseline.iface.name} · fixed nav, generic dashboard`,
       }}
       demo={{
         config: demo.config,
-        data: resolveConfigData(db, scope, demo.config.components),
+        data: await resolveConfigData(db, scope, demo.config.components),
         label: "After · demo interface",
         caption: `Shared demo surface · version ${demo.version.version}`,
       }}
       scenarios={DEMO_SCENARIOS}
       demoRuns={latestByScenario}
-      engineLabel={process.env.OPENAI_API_KEY ? providerModel() : "Local planner"}
+      engineLabel={configuredEngineLabel()}
       options={{ owners: [], leads: [], deals: [], companies: [] }}
       role={role}
       currentUserName={ctx.user.name}

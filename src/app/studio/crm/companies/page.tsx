@@ -18,7 +18,7 @@ export default async function CompaniesPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
-  const rows = resolveRecordDataset(db, scope, "companies").rows;
+  const rows = (await resolveRecordDataset(db, scope, "companies")).rows;
   const fields = datasetFields("companies");
 
   const totalRevenue = rows.reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
@@ -40,10 +40,10 @@ export default async function CompaniesPage() {
       rowActions={[]}
       emptyHint="No companies yet."
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
     />
   );

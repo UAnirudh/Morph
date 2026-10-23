@@ -12,10 +12,10 @@ export default async function WorkspacesPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const counts = {
-    leads: (db.prepare("SELECT COUNT(*) AS c FROM leads WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
-    deals: (db.prepare("SELECT COUNT(*) AS c FROM deals WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
-    tasks: (db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
-    activities: (db.prepare("SELECT COUNT(*) AS c FROM activities WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
+    leads: (await db.prepare("SELECT COUNT(*) AS c FROM leads WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
+    deals: (await db.prepare("SELECT COUNT(*) AS c FROM deals WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
+    tasks: (await db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
+    activities: (await db.prepare("SELECT COUNT(*) AS c FROM activities WHERE workspace_id = ?").get(ctx.workspace.id) as { c: number }).c,
   };
 
   return (

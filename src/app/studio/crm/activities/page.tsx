@@ -18,7 +18,7 @@ export default async function ActivitiesPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
-  const rows = resolveRecordDataset(db, scope, "activities").rows;
+  const rows = (await resolveRecordDataset(db, scope, "activities")).rows;
   const fields = datasetFields("activities");
   const automated = rows.filter((row) => row.kind === "workflow").length;
   const touches = rows.filter((row) => row.kind === "call" || row.kind === "email" || row.kind === "meeting").length;
@@ -39,10 +39,10 @@ export default async function ActivitiesPage() {
       rowActions={[]}
       emptyHint="Nothing logged yet."
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
     />
   );

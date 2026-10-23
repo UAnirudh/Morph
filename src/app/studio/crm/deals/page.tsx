@@ -21,14 +21,14 @@ export default async function DealsPage() {
   const ctx = await getWorkspaceContext({ requireOnboarded: true });
   const db = getDb();
   const scope = { workspaceId: ctx.workspace.id, userId: ctx.user.id };
-  const rows = resolveRecordDataset(db, scope, "deals").rows;
+  const rows = (await resolveRecordDataset(db, scope, "deals")).rows;
   const fields = datasetFields("deals").filter((field) => COLUMNS.includes(field.key));
 
   const metrics: RecordMetric[] = [
-    { label: "Pipeline value", value: resolveMetric(db, scope, "pipeline_value"), format: "currency", hint: "Open deal value" },
-    { label: "Open deals", value: resolveMetric(db, scope, "open_deals"), format: "number", hint: "Not closed" },
-    { label: "Win rate", value: resolveMetric(db, scope, "win_rate"), format: "percent", hint: "Won ÷ closed" },
-    { label: "At-risk deals", value: resolveMetric(db, scope, "at_risk_deals"), format: "number", hint: "No movement in 21+ days" },
+    { label: "Pipeline value", value: await resolveMetric(db, scope, "pipeline_value"), format: "currency", hint: "Open deal value" },
+    { label: "Open deals", value: await resolveMetric(db, scope, "open_deals"), format: "number", hint: "Not closed" },
+    { label: "Win rate", value: await resolveMetric(db, scope, "win_rate"), format: "percent", hint: "Won ÷ closed" },
+    { label: "At-risk deals", value: await resolveMetric(db, scope, "at_risk_deals"), format: "number", hint: "No movement in 21+ days" },
   ];
 
   return (
@@ -45,10 +45,10 @@ export default async function DealsPage() {
       showPipeline
       emptyHint="No deals in this view."
       options={{
-        owners: listOwnerOptions(db, ctx.workspace.id),
-        leads: listLeadOptions(db, ctx.workspace.id),
-        deals: listDealOptions(db, ctx.workspace.id),
-        companies: listCompanyOptions(db, ctx.workspace.id),
+        owners: await listOwnerOptions(db, ctx.workspace.id),
+        leads: await listLeadOptions(db, ctx.workspace.id),
+        deals: await listDealOptions(db, ctx.workspace.id),
+        companies: await listCompanyOptions(db, ctx.workspace.id),
       }}
     />
   );

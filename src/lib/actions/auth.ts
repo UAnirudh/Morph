@@ -51,7 +51,7 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   }
 
   const db = getDb();
-  const existing = db
+  const existing = await db
     .prepare("SELECT id FROM users WHERE email = ?")
     .get(parsed.data.email) as { id: string } | undefined;
   if (existing) {
@@ -63,7 +63,7 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
 
   const id = newId();
   try {
-    db.prepare(
+    await db.prepare(
       "INSERT INTO users (id, email, name, password_hash, avatar_color, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).run(id, parsed.data.email, parsed.data.name, hashPassword(parsed.data.password), "violet", nowIso());
   } catch (error) {
@@ -85,7 +85,7 @@ export async function signInAction(_prev: AuthState, formData: FormData): Promis
     return { error: "Enter your email and password." };
   }
   const db = getDb();
-  const user = db
+  const user = await db
     .prepare("SELECT id, password_hash FROM users WHERE email = ?")
     .get(parsed.data.email) as { id: string; password_hash: string } | undefined;
   if (!user || !verifyPassword(parsed.data.password, user.password_hash)) {
@@ -98,7 +98,7 @@ export async function signInAction(_prev: AuthState, formData: FormData): Promis
 
 export async function demoLoginAction(): Promise<void> {
   const db = getDb();
-  const demo = db.prepare("SELECT id FROM users WHERE email = ?").get(DEMO_EMAIL) as
+  const demo = await db.prepare("SELECT id FROM users WHERE email = ?").get(DEMO_EMAIL) as
     | { id: string }
     | undefined;
   if (!demo) {
@@ -135,7 +135,7 @@ export async function completeOnboardingAction(input: {
     return { ok: false, error: "Choose a role and at least one focus area." };
   }
   const db = getDb();
-  const membership = db
+  const membership = await db
     .prepare("SELECT * FROM workspace_members WHERE user_id = ? ORDER BY created_at ASC LIMIT 1")
     .get(user.id) as { workspace_id: string } | undefined;
 
@@ -143,7 +143,7 @@ export async function completeOnboardingAction(input: {
 
   if (!workspaceId) {
     try {
-      const provisioned = provisionWorkspaceForUser(db, {
+      const provisioned = await provisionWorkspaceForUser(db, {
         id: user.id,
         name: user.name,
         email: user.email,
@@ -163,7 +163,7 @@ export async function completeOnboardingAction(input: {
     accessibility: { ...preset.accessibility, fontSize: parsed.data.fontSize, reduceClutter: parsed.data.reduceClutter },
   });
 
-  const personal = db
+  const personal = await db
     .prepare(
       "SELECT * FROM interfaces WHERE workspace_id = ? AND owner_id = ? AND kind = 'personal' LIMIT 1",
     )
@@ -171,12 +171,12 @@ export async function completeOnboardingAction(input: {
 
   let personalInterfaceId = personal?.id;
   if (personalInterfaceId) {
-    const latest = db
+    const latest = await db
       .prepare("SELECT MAX(version) AS v FROM interface_versions WHERE interface_id = ?")
       .get(personalInterfaceId) as { v: number | null };
     const nextVersion = (latest.v ?? 0) + 1;
-    db.prepare("UPDATE interface_versions SET is_current = 0 WHERE interface_id = ?").run(personalInterfaceId);
-    db.prepare(
+    await db.prepare("UPDATE interface_versions SET is_current = 0 WHERE interface_id = ?").run(personalInterfaceId);
+    await db.prepare(
       `INSERT INTO interface_versions (id, interface_id, workspace_id, version, config, summary, source, created_by, is_current, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'template', ?, 1, ?)`,
     ).run(
@@ -189,14 +189,14 @@ export async function completeOnboardingAction(input: {
       user.id,
       nowIso(),
     );
-    db.prepare("UPDATE interfaces SET name = ?, updated_at = ? WHERE id = ?").run(
+    await db.prepare("UPDATE interfaces SET name = ?, updated_at = ? WHERE id = ?").run(
       config.name,
       nowIso(),
       personalInterfaceId,
     );
   }
 
-  db.prepare(
+  await db.prepare(
     `UPDATE user_preferences SET job_role = ?, primary_goals = ?, density = ?, accessibility = ?,
        active_interface_id = COALESCE(?, active_interface_id), onboarding_complete = 1, updated_at = ?
      WHERE user_id = ? AND workspace_id = ?`,

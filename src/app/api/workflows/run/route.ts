@@ -12,13 +12,22 @@ export const dynamic = "force-dynamic";
  * Runs every enabled daily-check workflow.
  *
  * Auth options:
- *  - `Authorization: Bearer $MORPH_CRON_SECRET` (Vercel Cron / external scheduler)
- *  - a signed-in session (used by the in-app "run daily checks" button is a
- *    server action; this route exists for schedulers)
+ *  - `Authorization: Bearer $MORPH_CRON_SECRET` (or Vercel's `CRON_SECRET`)
+ *  - a signed-in session, limited to the caller's own workspaces
+ *
+ * Vercel Cron issues a GET, so both verbs hit the same handler.
  */
+export async function GET(request: Request) {
+  return handle(request);
+}
+
 export async function POST(request: Request) {
+  return handle(request);
+}
+
+async function handle(request: Request) {
   const db = getDb();
-  const secret = process.env.MORPH_CRON_SECRET;
+  const secret = process.env.MORPH_CRON_SECRET?.trim() || process.env.CRON_SECRET?.trim();
   const header = request.headers.get("authorization") ?? "";
   const cronAuthorized = Boolean(secret) && header === `Bearer ${secret}`;
   let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
@@ -50,8 +59,8 @@ export async function POST(request: Request) {
   // The scheduler secret may run every tenant's daily checks; a signed-in user may
   // only run the workspaces they belong to.
   const workspaces = cronAuthorized
-    ? (db.prepare("SELECT * FROM workspaces").all() as WorkspaceRow[])
-    : (db
+    ? (await db.prepare("SELECT * FROM workspaces").all() as WorkspaceRow[])
+    : (await db
         .prepare(
           "SELECT w.* FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id WHERE m.user_id = ?",
         )
@@ -65,7 +74,7 @@ export async function POST(request: Request) {
   }> = [];
 
   for (const workspace of workspaces) {
-    const workflows = db
+    const workflows = await db
       .prepare(
         "SELECT * FROM workflow_definitions WHERE workspace_id = ? AND enabled = 1 AND trigger_type = 'daily_check' LIMIT 20",
       )
@@ -75,7 +84,7 @@ export async function POST(request: Request) {
     const actorId = workflows[0]?.created_by;
     if (!actorId) continue;
     try {
-      for (const run of runDailyChecks({ db, workspaceId: workspace.id, actorId })) {
+      for (const run of await runDailyChecks({ db, workspaceId: workspace.id, actorId })) {
         results.push({
           workspaceId: workspace.id,
           workflow: run.workflowName,
